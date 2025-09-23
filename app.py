@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles   # <-- added
-from sentence_transformers import SentenceTransformer
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 import uvicorn
 import pandas as pd
@@ -10,17 +9,39 @@ import re
 
 app = FastAPI(title="Quick Book Recommender")
 
-# ✅ Serve static files (for covers)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Lazy loading to reduce startup memory
+_model = None
+_CORPUS_EMBS = None
+
+def get_model():
+    """Lazy load the sentence transformer model"""
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _model
+
+def get_corpus_embeddings():
+    """Lazy load corpus embeddings"""
+    global _CORPUS_EMBS
+    if _CORPUS_EMBS is None:
+        model = get_model()
+        texts = [b["title"] + " " + b["author"] + " " + b["description"] for b in BOOKS]
+        embs = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+        norms = np.linalg.norm(embs, axis=1, keepdims=True)
+        norms[norms==0] = 1.0
+        _CORPUS_EMBS = embs / norms
+    return _CORPUS_EMBS
+
+# Mount static files only if directory exists
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def load_books_from_csv(csv_path="books.csv"):
-    """
-    Load books from CSV file. Expected columns:
-    - title, author, description, genres
-    Covers will be mapped to static/covers/{id}.jpg
-    """
+    """Load books from CSV with memory optimization"""
     try:
-        df = pd.read_csv(csv_path)
+        # More memory-efficient pandas reading
+        df = pd.read_csv(csv_path, dtype={'title': 'string', 'author': 'string', 'description': 'string', 'genres': 'string'})
         books = []
         for idx, row in df.iterrows():
             genres_str = str(row.get('genres', '')).strip()
@@ -30,16 +51,17 @@ def load_books_from_csv(csv_path="books.csv"):
                 genres = []
 
             book_id = idx + 1
-            cover_path = f"/static/covers/{book_id}.jpg"  # ✅ auto-link cover by id
+            cover_path = f"/static/covers/{book_id}.jpg" if os.path.exists("static") else None
 
             book = {
                 "id": book_id,
                 "title": str(row.get('title', 'Unknown Title')).strip(),
                 "author": str(row.get('author', 'Unknown Author')).strip(),
                 "description": str(row.get('description', 'No description available')).strip(),
-                "genres": genres,
-                "cover": cover_path   # ✅ include cover path
+                "genres": genres
             }
+            if cover_path:
+                book["cover"] = cover_path
             books.append(book)
 
         print(f"Loaded {len(books)} books from {csv_path}")
@@ -51,105 +73,88 @@ def load_books_from_csv(csv_path="books.csv"):
         print(f"Error loading CSV: {e}. Using default book list.")
         return get_default_books()
 
-
 def get_default_books():
-    """Fallback to the original hardcoded book list"""
+    """Smaller default book list to reduce memory usage"""
     return [
         {"id": 1, "title": "Dune", "author": "Frank Herbert",
          "description": "Epic science fiction about politics, religion, and desert planet Arrakis.", "genres": ["Science Fiction","Adventure"]},
-        {"id": 2, "title": "Neuromancer", "author": "William Gibson",
-         "description": "Cyberpunk classic; a washed-up hacker is hired for one last job.", "genres": ["Science Fiction","Cyberpunk"]},
+        {"id": 2, "title": "Pride and Prejudice", "author": "Jane Austen",
+         "description": "A witty social commentary and romance centered on Elizabeth Bennet.", "genres": ["Romance","Classic"]},
         {"id": 3, "title": "The Hobbit", "author": "J.R.R. Tolkien",
          "description": "A reluctant hobbit goes on an adventure with dwarves to reclaim treasure.", "genres": ["Fantasy","Adventure"]},
         {"id": 4, "title": "1984", "author": "George Orwell",
          "description": "Dystopian novel about surveillance, totalitarianism and truth control.", "genres": ["Dystopia","Political Fiction"]},
-        {"id": 5, "title": "Pride and Prejudice", "author": "Jane Austen",
-         "description": "A witty social commentary and romance centered on Elizabeth Bennet.", "genres": ["Romance","Classic"]},
-        {"id": 6, "title": "The Martian", "author": "Andy Weir",
+        {"id": 5, "title": "The Martian", "author": "Andy Weir",
          "description": "A stranded astronaut uses engineering and humor to survive on Mars.", "genres": ["Science Fiction","Survival"]},
-        {"id": 7, "title": "Foundation", "author": "Isaac Asimov",
-         "description": "A mathematician predicts the fall of an empire and starts the Foundation project.", "genres": ["Science Fiction","Epic"]},
-        {"id": 8, "title": "The Name of the Wind", "author": "Patrick Rothfuss",
-         "description": "A gifted young man grows into a legendary figure; lyrical fantasy.", "genres": ["Fantasy","Epic"]},
-        {"id": 9, "title": "Sapiens", "author": "Yuval Noah Harari",
-         "description": "A brief history of humankind exploring cognitive, agricultural, and scientific revolutions.", "genres": ["Nonfiction","History"]},
-        {"id": 10, "title": "The Left Hand of Darkness", "author": "Ursula K. Le Guin",
-         "description": "An envoy visits a planet with ambisexual inhabitants; explores society and politics.", "genres": ["Science Fiction","Social Commentary"]},
-        {"id": 11, "title": "Frankenstein", "author": "Mary Shelley",
-         "description": "A scientist creates life and faces the consequences; early science fiction and gothic novel.", "genres": ["Classic","Gothic"]},
-        {"id": 12, "title": "The Catcher in the Rye", "author": "J.D. Salinger",
-         "description": "A coming-of-age story about teenage alienation and angst.", "genres": ["Classic","Coming-of-age"]},
-        # Add more default books to expand your dataset
-        {"id": 13, "title": "The Great Gatsby", "author": "F. Scott Fitzgerald",
-         "description": "A critique of the American Dream set in the Jazz Age.", "genres": ["Classic","Romance"]},
-        {"id": 14, "title": "To Kill a Mockingbird", "author": "Harper Lee",
-         "description": "A story of racial injustice and childhood innocence in the American South.", "genres": ["Classic","Social Commentary"]},
-        {"id": 15, "title": "The Hunger Games", "author": "Suzanne Collins",
+        {"id": 6, "title": "Neuromancer", "author": "William Gibson",
+         "description": "Cyberpunk classic; a washed-up hacker is hired for one last job.", "genres": ["Science Fiction","Cyberpunk"]},
+        {"id": 7, "title": "The Hunger Games", "author": "Suzanne Collins",
          "description": "A dystopian tale of survival and rebellion in a totalitarian society.", "genres": ["Dystopia","Adventure","Young Adult"]},
-        {"id": 16, "title": "Harry Potter and the Sorcerer's Stone", "author": "J.K. Rowling",
+        {"id": 8, "title": "Harry Potter and the Sorcerer's Stone", "author": "J.K. Rowling",
          "description": "A young wizard discovers his magical heritage and attends Hogwarts.", "genres": ["Fantasy","Adventure","Young Adult"]},
-        {"id": 17, "title": "The Girl with the Dragon Tattoo", "author": "Stieg Larsson",
-         "description": "A journalist and hacker investigate a wealthy family's dark secrets.", "genres": ["Mystery","Thriller"]},
-        {"id": 18, "title": "Gone Girl", "author": "Gillian Flynn",
+        {"id": 9, "title": "Gone Girl", "author": "Gillian Flynn",
          "description": "A psychological thriller about a marriage gone wrong.", "genres": ["Thriller","Mystery","Psychological"]},
-        {"id": 19, "title": "The Fault in Our Stars", "author": "John Green",
+        {"id": 10, "title": "Sapiens", "author": "Yuval Noah Harari",
+         "description": "A brief history of humankind exploring cognitive, agricultural, and scientific revolutions.", "genres": ["Nonfiction","History"]},
+        {"id": 11, "title": "The Fault in Our Stars", "author": "John Green",
          "description": "A love story between two teenagers with cancer.", "genres": ["Romance","Young Adult","Contemporary Fiction"]},
-        {"id": 20, "title": "Educated", "author": "Tara Westover",
-         "description": "A memoir about education, family, and the struggle for self-invention.", "genres": ["Nonfiction","Memoir","Biography"]},
-        {"id": 21, "title": "The Silent Patient", "author": "Alex Michaelides",
-         "description": "A psychotherapist's obsession with treating a woman who refuses to speak.", "genres": ["Thriller","Mystery","Psychological"]},
-        {"id": 22, "title": "Where the Crawdads Sing", "author": "Delia Owens",
-         "description": "A coming-of-age story set in the marshlands of North Carolina.", "genres": ["Mystery","Coming-of-age","Romance"]},
-        {"id": 23, "title": "The Seven Husbands of Evelyn Hugo", "author": "Taylor Jenkins Reid",
-         "description": "A reclusive Hollywood icon tells her life story to an unknown journalist.", "genres": ["Romance","Historical Fiction","LGBTQ+"]},
-        {"id": 24, "title": "Atomic Habits", "author": "James Clear",
-         "description": "A guide to building good habits and breaking bad ones.", "genres": ["Nonfiction","Self-Help","Psychology"]},
-        {"id": 25, "title": "The Midnight Library", "author": "Matt Haig",
-         "description": "A woman explores alternate versions of her life in a magical library.", "genres": ["Fantasy","Contemporary Fiction","Philosophy"]}
+        {"id": 12, "title": "Atomic Habits", "author": "James Clear",
+         "description": "A guide to building good habits and breaking bad ones.", "genres": ["Nonfiction","Self-Help","Psychology"]}
     ]
 
-# Load books (will try CSV first, fallback to default)
+# Load books
 BOOKS = load_books_from_csv()
 
-MODEL_NAME = "all-MiniLM-L6-v2"   # small & fast
-model = SentenceTransformer(MODEL_NAME)
+# Lazy initialization of lookup dictionaries
+def get_title_lookup():
+    return {b['title'].lower(): i for i, b in enumerate(BOOKS)}
 
-def build_corpus_embeddings(books):
-    texts = [b["title"] + " " + b["author"] + " " + b["description"] for b in books]
-    embs = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-    norms = np.linalg.norm(embs, axis=1, keepdims=True)
-    norms[norms==0] = 1.0
-    embs = embs / norms
-    return embs
+def get_genres_info():
+    all_genres = sorted({g for b in BOOKS for g in b.get('genres', [])})
+    normalized_genres = [g.lower() for g in all_genres]
+    return all_genres, normalized_genres
 
-# Update the corpus embeddings and lookup dictionaries to use loaded books
-CORPUS_EMBS = build_corpus_embeddings(BOOKS)
-_TITLE_LOOKUP = {b['title'].lower(): i for i, b in enumerate(BOOKS)}
-ALL_GENRES = sorted({g for b in BOOKS for g in b.get('genres', [])})
-NORMALIZED_GENRES = [g.lower() for g in ALL_GENRES]
-
-# synonym map (extend as needed)
-GENRE_SYNONYMS = {
-    "sci-fi": "science fiction",
-    "scifi": "science fiction",
-    "sf": "science fiction",
-    "sciencefiction": "science fiction",
-    "romantic": "romance",
-    "romance": "romance",
-    "dystopian": "dystopia",
-    "non-fiction": "nonfiction",
-    "nonfiction": "nonfiction",
-    # add more synonyms if you like
-}
-
-def _normalize_genre_token(tok):
-    t = tok.lower().strip()
-    t_simple = re.sub(r'[^a-z0-9]', '', t)  # remove punctuation like "sci-fi" -> scifi
-    return GENRE_SYNONYMS.get(t, GENRE_SYNONYMS.get(t_simple, t))
+def _detect_genres_from_query_improved(query):
+    """Improved genre detection"""
+    q = query.lower().strip()
+    detected = set()
+    
+    genre_mapping = {
+        "science fiction": "science fiction", "sci-fi": "science fiction", "scifi": "science fiction", "sf": "science fiction",
+        "fantasy": "fantasy", "romance": "romance", "romantic": "romance",
+        "dystopia": "dystopia", "dystopian": "dystopia",
+        "nonfiction": "nonfiction", "non-fiction": "nonfiction", "non fiction": "nonfiction",
+        "classic": "classic", "classics": "classic", "adventure": "adventure", "cyberpunk": "cyberpunk",
+        "gothic": "gothic", "history": "history", "historical": "history", "epic": "epic",
+        "survival": "survival", "political": "political fiction", "politics": "political fiction",
+        "coming-of-age": "coming-of-age", "coming of age": "coming-of-age",
+        "social commentary": "social commentary", "thriller": "thriller", "mystery": "mystery",
+        "psychological": "psychological", "young adult": "young adult", "ya": "young adult",
+        "contemporary": "contemporary fiction", "memoir": "memoir", "biography": "biography",
+        "self-help": "self-help", "philosophy": "philosophy"
+    }
+    
+    if q in genre_mapping:
+        detected.add(genre_mapping[q])
+        return list(detected)
+    
+    for genre_term, canonical_genre in genre_mapping.items():
+        if genre_term in q:
+            detected.add(canonical_genre)
+    
+    if not detected:
+        words = q.split()
+        for word in words:
+            word = word.strip('.,!?;:"()[]{}')
+            if word in genre_mapping:
+                detected.add(genre_mapping[word])
+    
+    return list(detected)
 
 def _find_title_mentioned(query):
     q = (query or "").lower()
-    for title, idx in _TITLE_LOOKUP.items():
+    title_lookup = get_title_lookup()
+    for title, idx in title_lookup.items():
         if title in q:
             return idx
     return None
@@ -160,81 +165,8 @@ def _book_has_genre(book, detected_genres):
     book_genres_norm = [g.lower() for g in book.get('genres', [])]
     return any(dg in book_genres_norm for dg in detected_genres)
 
-def _detect_genres_from_query_improved(query):
-    """
-    Improved genre detection with better matching
-    """
-    q = query.lower().strip()
-    detected = set()
-    
-    # Create a comprehensive genre mapping
-    genre_mapping = {
-        # Direct mappings
-        "science fiction": "science fiction",
-        "sci-fi": "science fiction", 
-        "scifi": "science fiction",
-        "sf": "science fiction",
-        "fantasy": "fantasy",
-        "romance": "romance",
-        "romantic": "romance",
-        "dystopia": "dystopia",
-        "dystopian": "dystopia",
-        "nonfiction": "nonfiction",
-        "non-fiction": "nonfiction",
-        "non fiction": "nonfiction",
-        "classic": "classic",
-        "classics": "classic",
-        "adventure": "adventure",
-        "cyberpunk": "cyberpunk",
-        "gothic": "gothic",
-        "history": "history",
-        "historical": "history",
-        "epic": "epic",
-        "survival": "survival",
-        "political": "political fiction",
-        "politics": "political fiction",
-        "coming-of-age": "coming-of-age",
-        "coming of age": "coming-of-age",
-        "social commentary": "social commentary",
-        "thriller": "thriller",
-        "mystery": "mystery",
-        "psychological": "psychological",
-        "young adult": "young adult",
-        "ya": "young adult",
-        "contemporary": "contemporary fiction",
-        "memoir": "memoir",
-        "biography": "biography",
-        "self-help": "self-help",
-        "philosophy": "philosophy"
-    }
-    
-    # Check for direct matches first (whole query)
-    if q in genre_mapping:
-        detected.add(genre_mapping[q])
-        return list(detected)
-    
-    # Check for substring matches
-    for genre_term, canonical_genre in genre_mapping.items():
-        if genre_term in q:
-            detected.add(canonical_genre)
-    
-    # If no matches found, try word-by-word matching
-    if not detected:
-        words = q.split()
-        for word in words:
-            word = word.strip('.,!?;:"()[]{}')  # Remove punctuation
-            if word in genre_mapping:
-                detected.add(genre_mapping[word])
-    
-    return list(detected)
-
 def recommend_by_text(query_text: str, k: int = 5):
-    """
-    Improved recommendation logic:
-    - Direct genre matching gets highest priority
-    - If user mentions a book title -> find similar books
-    - Otherwise: use embedding similarity
-    """
+    """Optimized recommendation logic"""
     q = (query_text or "").strip()
     if not q:
         return []
@@ -242,57 +174,53 @@ def recommend_by_text(query_text: str, k: int = 5):
     # 1) Check if user mentioned a specific book title
     title_idx = _find_title_mentioned(q)
     if title_idx is not None:
-        # Use the book's embedding as the query vector
-        q_emb = CORPUS_EMBS[title_idx]
-        sims = (CORPUS_EMBS @ q_emb)
-        sims[title_idx] = -1.0  # Don't return the same book
+        corpus_embs = get_corpus_embeddings()
+        q_emb = corpus_embs[title_idx]
+        sims = (corpus_embs @ q_emb)
+        sims[title_idx] = -1.0
         top_idx = np.argsort(-sims)[:k]
-        # Return without similarity scores
         return [BOOKS[int(i)] for i in top_idx]
 
-    # 2) Detect genres from query (improved detection)
+    # 2) Detect genres from query
     detected_genres = _detect_genres_from_query_improved(q)
 
     # 3) If genres detected, prioritize genre-based recommendations
     if detected_genres:
-        # Find all books that match any of the detected genres
         genre_matches = []
         for i, book in enumerate(BOOKS):
             book_genres_lower = [g.lower() for g in book.get('genres', [])]
             if any(dg in book_genres_lower for dg in detected_genres):
                 genre_matches.append((i, book))
         
-        # If we have enough genre matches, return them (shuffled for variety)
         if len(genre_matches) >= k:
-            # Sort by title for consistent ordering, then take first k
             genre_matches.sort(key=lambda x: x[1]['title'])
             return [book for _, book in genre_matches[:k]]
         elif genre_matches:
-            # If we have some genre matches but not enough, fill the rest with embedding similarity
             genre_books = [book for _, book in genre_matches]
             remaining_needed = k - len(genre_books)
             
             if remaining_needed > 0:
-                # Get embedding similarity for remaining slots
+                model = get_model()
+                corpus_embs = get_corpus_embeddings()
                 q_emb = model.encode([q], convert_to_numpy=True)[0]
                 q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
-                sims = (CORPUS_EMBS @ q_emb)
+                sims = (corpus_embs @ q_emb)
                 
-                # Exclude already selected genre books
                 used_indices = {i for i, _ in genre_matches}
                 available_sims = [(i, sims[i]) for i in range(len(BOOKS)) if i not in used_indices]
                 available_sims.sort(key=lambda x: -x[1])
                 
-                # Add the top remaining books
                 for i, _ in available_sims[:remaining_needed]:
                     genre_books.append(BOOKS[i])
             
             return genre_books[:k]
 
-    # 4) No genre detected and no title mentioned -> use embedding similarity
+    # 4) No genre detected -> use embedding similarity
+    model = get_model()
+    corpus_embs = get_corpus_embeddings()
     q_emb = model.encode([q], convert_to_numpy=True)[0]
     q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
-    sims = (CORPUS_EMBS @ q_emb)
+    sims = (corpus_embs @ q_emb)
     top_idx = np.argsort(-sims)[:k]
     return [BOOKS[int(i)] for i in top_idx]
 
@@ -340,7 +268,7 @@ async def homepage():
   justify-content:center;
   color:var(--muted);
   font-weight:700;
-  object-fit:cover;  /* <-- ensures images scale nicely */
+  object-fit:cover;
 }
 
     .meta{flex:1}
@@ -415,7 +343,6 @@ async def homepage():
 
   chips.forEach(c=>{
     c.addEventListener('click', ()=>{
-      // toggle active
       if(c.classList.contains('active')) {
         c.classList.remove('active');
         qInput.value = '';
@@ -475,21 +402,21 @@ async def homepage():
     items.forEach(it=>{
       const card = document.createElement('div'); card.className='result-card';
       let cover;
-if (it.cover) {
-  cover = document.createElement('img');
-  cover.className = 'cover';
-  cover.src = it.cover;
-  cover.alt = it.title;
-  cover.style.width = '70px';
-  cover.style.height = '96px';
-  cover.style.borderRadius = '6px';
-  cover.style.objectFit = 'cover';
-} else {
-  cover = document.createElement('div');
-  cover.className = 'cover';
-  const initials = (it.title||'').split(' ').slice(0,2).map(s=>s[0]).join('').toUpperCase();
-  cover.textContent = initials;
-}
+      if (it.cover) {
+        cover = document.createElement('img');
+        cover.className = 'cover';
+        cover.src = it.cover;
+        cover.alt = it.title;
+        cover.style.width = '70px';
+        cover.style.height = '96px';
+        cover.style.borderRadius = '6px';
+        cover.style.objectFit = 'cover';
+      } else {
+        cover = document.createElement('div');
+        cover.className = 'cover';
+        const initials = (it.title||'').split(' ').slice(0,2).map(s=>s[0]).join('').toUpperCase();
+        cover.textContent = initials;
+      }
       const meta = document.createElement('div'); meta.className='meta';
       const title = document.createElement('div'); title.className='title'; title.textContent = it.title;
       const author = document.createElement('div'); author.className='author'; author.textContent = it.author;
@@ -499,7 +426,7 @@ if (it.cover) {
       const score = document.createElement('div');
       score.className = 'score';
       if (typeof it.score === 'number') {
-        const pct = Math.round((it.score) * 100); // e.g. 0.513 -> 51%
+        const pct = Math.round((it.score) * 100);
         score.textContent = pct + '%';
       } else {
         score.textContent = '';
@@ -526,7 +453,11 @@ async def recommend(request: Request):
     results = recommend_by_text(text, k=k)
     return {"results": results}
 
+# Health check endpoint for render
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("app:app", host="0.0.0.0", port=port)
