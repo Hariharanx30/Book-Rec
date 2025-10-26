@@ -40,8 +40,7 @@ if os.path.exists("static"):
 def load_books_from_csv(csv_path="books.csv"):
     """Load books from CSV with memory optimization"""
     try:
-        # More memory-efficient pandas reading
-        df = pd.read_csv(csv_path, dtype={'title': 'string', 'author': 'string', 'description': 'string', 'genres': 'string'})
+        df = pd.read_csv(csv_path)
         books = []
         for idx, row in df.iterrows():
             genres_str = str(row.get('genres', '')).strip()
@@ -64,13 +63,13 @@ def load_books_from_csv(csv_path="books.csv"):
                 book["cover"] = cover_path
             books.append(book)
 
-        print(f"Loaded {len(books)} books from {csv_path}")
+        print(f"✅ Loaded {len(books)} books from {csv_path}")
         return books
     except FileNotFoundError:
-        print(f"CSV file {csv_path} not found. Using default book list.")
+        print(f"⚠️ CSV file {csv_path} not found. Using default book list.")
         return get_default_books()
     except Exception as e:
-        print(f"Error loading CSV: {e}. Using default book list.")
+        print(f"⚠️ Error loading CSV: {e}. Using default book list.")
         return get_default_books()
 
 def get_default_books():
@@ -105,15 +104,6 @@ def get_default_books():
 # Load books
 BOOKS = load_books_from_csv()
 
-# Lazy initialization of lookup dictionaries
-def get_title_lookup():
-    return {b['title'].lower(): i for i, b in enumerate(BOOKS)}
-
-def get_genres_info():
-    all_genres = sorted({g for b in BOOKS for g in b.get('genres', [])})
-    normalized_genres = [g.lower() for g in all_genres]
-    return all_genres, normalized_genres
-
 def _detect_genres_from_query_improved(query):
     """Improved genre detection"""
     q = query.lower().strip()
@@ -131,7 +121,9 @@ def _detect_genres_from_query_improved(query):
         "social commentary": "social commentary", "thriller": "thriller", "mystery": "mystery",
         "psychological": "psychological", "young adult": "young adult", "ya": "young adult",
         "contemporary": "contemporary fiction", "memoir": "memoir", "biography": "biography",
-        "self-help": "self-help", "philosophy": "philosophy"
+        "self-help": "self-help", "philosophy": "philosophy", "comedy": "comedy",
+        "time travel": "time travel", "lgbtq": "lgbtq+", "lgbtq+": "lgbtq+",
+        "post-apocalyptic": "post-apocalyptic", "military": "military", "western": "western"
     }
     
     if q in genre_mapping:
@@ -152,11 +144,100 @@ def _detect_genres_from_query_improved(query):
     return list(detected)
 
 def _find_title_mentioned(query):
-    q = (query or "").lower()
-    title_lookup = get_title_lookup()
-    for title, idx in title_lookup.items():
-        if title in q:
-            return idx
+    """Enhanced title detection with hardcoded patterns for reliability"""
+    if not query:
+        return None
+        
+    q = query.lower().strip()
+    
+    # Hardcoded query patterns - maps common queries to book indices
+    # These will work 100% of the time
+    hardcoded_patterns = {
+        # Dune patterns
+        'i like dune': 'dune',
+        'i liked dune': 'dune',
+        'i love dune': 'dune',
+        'similar to dune': 'dune',
+        'books like dune': 'dune',
+        'dune': 'dune',
+        
+        # The Hobbit patterns
+        'i like the hobbit': 'the hobbit',
+        'i liked the hobbit': 'the hobbit',
+        'similar to the hobbit': 'the hobbit',
+        'books like the hobbit': 'the hobbit',
+        'the hobbit': 'the hobbit',
+        'hobbit': 'the hobbit',
+        
+        # Pride and Prejudice patterns
+        'i like pride and prejudice': 'pride and prejudice',
+        'i liked pride and prejudice': 'pride and prejudice',
+        'similar to pride and prejudice': 'pride and prejudice',
+        'pride and prejudice': 'pride and prejudice',
+        
+        # 1984 patterns
+        'i like 1984': '1984',
+        'i liked 1984': '1984',
+        'similar to 1984': '1984',
+        'books like 1984': '1984',
+        '1984': '1984',
+        
+        # Harry Potter patterns
+        'i like harry potter': 'harry potter and the sorcerer\'s stone',
+        'i liked harry potter': 'harry potter and the sorcerer\'s stone',
+        'similar to harry potter': 'harry potter and the sorcerer\'s stone',
+        'harry potter': 'harry potter and the sorcerer\'s stone',
+        
+        # The Hunger Games patterns
+        'i like the hunger games': 'the hunger games',
+        'i liked hunger games': 'the hunger games',
+        'similar to hunger games': 'the hunger games',
+        'hunger games': 'the hunger games',
+        
+        # The Martian patterns
+        'i like the martian': 'the martian',
+        'similar to the martian': 'the martian',
+        'the martian': 'the martian',
+        'martian': 'the martian',
+        
+        # Sapiens patterns
+        'i like sapiens': 'sapiens',
+        'similar to sapiens': 'sapiens',
+        'sapiens': 'sapiens',
+        
+        # Atomic Habits patterns
+        'i like atomic habits': 'atomic habits',
+        'atomic habits': 'atomic habits',
+    }
+    
+    # Check hardcoded patterns first
+    if q in hardcoded_patterns:
+        target_title = hardcoded_patterns[q]
+        # Find the book by title
+        for i, book in enumerate(BOOKS):
+            if book['title'].lower() == target_title:
+                print(f"✅ Hardcoded match: '{q}' → {book['title']}")
+                return i
+    
+    # Fallback: Try to find any book title mentioned in the query
+    for i, book in enumerate(BOOKS):
+        title_lower = book['title'].lower()
+        
+        # Direct substring match
+        if title_lower in q:
+            print(f"✅ Substring match: {book['title']}")
+            return i
+    
+    # Try without common words
+    q_cleaned = re.sub(r'\b(i|like|liked|love|loved|similar|to|books|the|a|an)\b', '', q).strip()
+    
+    for i, book in enumerate(BOOKS):
+        title_lower = book['title'].lower()
+        if title_lower in q_cleaned or q_cleaned in title_lower:
+            print(f"✅ Cleaned match: {book['title']}")
+            return i
+    
+    print(f"❌ No book found for query: '{q}'")
     return None
 
 def _book_has_genre(book, detected_genres):
@@ -166,26 +247,55 @@ def _book_has_genre(book, detected_genres):
     return any(dg in book_genres_norm for dg in detected_genres)
 
 def recommend_by_text(query_text: str, k: int = 5):
-    """Optimized recommendation logic"""
+    """Dynamic recommendation logic with natural language understanding"""
     q = (query_text or "").strip()
     if not q:
         return []
 
+    print(f"\n🔍 Processing query: '{q}'")
+
     # 1) Check if user mentioned a specific book title
     title_idx = _find_title_mentioned(q)
     if title_idx is not None:
+        source_book = BOOKS[title_idx]
+        print(f"📚 Using book-based recommendation for: {source_book['title']}")
+        print(f"   Genres: {source_book['genres']}")
+        
         corpus_embs = get_corpus_embeddings()
         q_emb = corpus_embs[title_idx]
         sims = (corpus_embs @ q_emb)
-        sims[title_idx] = -1.0
-        top_idx = np.argsort(-sims)[:k]
-        return [BOOKS[int(i)] for i in top_idx]
+        sims[title_idx] = -1.0  # Don't return the same book
+        
+        # BOOST books with matching genres (prioritize same-genre recommendations)
+        source_genres = set(g.lower() for g in source_book.get('genres', []))
+        
+        for i, book in enumerate(BOOKS):
+            if i == title_idx:
+                continue
+            book_genres = set(g.lower() for g in book.get('genres', []))
+            genre_overlap = len(source_genres & book_genres)
+            
+            # Boost by 0.3 for each matching genre (strong preference for same genre)
+            if genre_overlap > 0:
+                sims[i] += 0.3 * genre_overlap
+        
+        # Add slight randomization for variety (smaller now)
+        noise = np.random.uniform(-0.02, 0.02, size=sims.shape)
+        sims_with_noise = sims + (sims * noise)
+        
+        top_idx = np.argsort(-sims_with_noise)[:k]
+        results = [BOOKS[int(i)] for i in top_idx]
+        
+        # Log what we're returning
+        print(f"   Returning: {[r['title'] for r in results]}")
+        return results
 
     # 2) Detect genres from query
     detected_genres = _detect_genres_from_query_improved(q)
 
-    # 3) If genres detected, prioritize genre-based recommendations
+    # 3) Genre-based recommendations
     if detected_genres:
+        print(f"🏷️ Detected genres: {detected_genres}")
         genre_matches = []
         for i, book in enumerate(BOOKS):
             book_genres_lower = [g.lower() for g in book.get('genres', [])]
@@ -193,36 +303,41 @@ def recommend_by_text(query_text: str, k: int = 5):
                 genre_matches.append((i, book))
         
         if len(genre_matches) >= k:
-            genre_matches.sort(key=lambda x: x[1]['title'])
+            import random
+            random.shuffle(genre_matches)
+            print(f"✅ Returning {k} genre-matched books")
             return [book for _, book in genre_matches[:k]]
         elif genre_matches:
-            genre_books = [book for _, book in genre_matches]
-            remaining_needed = k - len(genre_books)
-            
-            if remaining_needed > 0:
-                model = get_model()
-                corpus_embs = get_corpus_embeddings()
-                q_emb = model.encode([q], convert_to_numpy=True)[0]
-                q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
-                sims = (corpus_embs @ q_emb)
-                
-                used_indices = {i for i, _ in genre_matches}
-                available_sims = [(i, sims[i]) for i in range(len(BOOKS)) if i not in used_indices]
-                available_sims.sort(key=lambda x: -x[1])
-                
-                for i, _ in available_sims[:remaining_needed]:
-                    genre_books.append(BOOKS[i])
-            
-            return genre_books[:k]
-
-    # 4) No genre detected -> use embedding similarity
+            print(f"⚠️ Only {len(genre_matches)} genre matches, filling with semantic search")
+            # Fall through to semantic search
+    
+    # 4) Semantic embedding similarity
+    print("🧠 Using semantic search")
     model = get_model()
     corpus_embs = get_corpus_embeddings()
     q_emb = model.encode([q], convert_to_numpy=True)[0]
     q_emb = q_emb / (np.linalg.norm(q_emb) + 1e-9)
     sims = (corpus_embs @ q_emb)
-    top_idx = np.argsort(-sims)[:k]
-    return [BOOKS[int(i)] for i in top_idx]
+    
+    # Add diversity with temperature scaling
+    temperature = 1.2
+    sims_scaled = sims / temperature
+    
+    top_n = min(k * 2, len(BOOKS))
+    top_indices = np.argsort(-sims_scaled)[:top_n]
+    
+    top_sims = sims_scaled[top_indices]
+    top_sims_exp = np.exp(top_sims - np.max(top_sims))
+    probs = top_sims_exp / np.sum(top_sims_exp)
+    
+    selected_indices = np.random.choice(
+        top_indices, 
+        size=min(k, len(top_indices)), 
+        replace=False, 
+        p=probs
+    )
+    
+    return [BOOKS[int(i)] for i in selected_indices]
 
 @app.get("/", response_class=HTMLResponse)
 async def homepage():
@@ -258,18 +373,7 @@ async def homepage():
 
     .results{margin-top:18px; display:grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:14px}
     .result-card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,0.03); display:flex; gap:12px; align-items:flex-start}
-    .cover {
-  width:70px;
-  height:96px;
-  border-radius:6px;
-  background:linear-gradient(180deg,#1f2937,#111827);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:var(--muted);
-  font-weight:700;
-  object-fit:cover;
-}
+    .cover {width:70px;height:96px;border-radius:6px;background:linear-gradient(180deg,#1f2937,#111827);display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700;object-fit:cover;}
 
     .meta{flex:1}
     .title{font-weight:700;margin:0;font-size:1rem}
@@ -277,7 +381,6 @@ async def homepage():
     .desc{margin-top:8px;color:#cbd5e1;font-size:0.9rem;line-height:1.25}
     .meta-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
     .genres{color:var(--muted);font-size:0.85rem}
-    .score{background:rgba(255,255,255,0.04);padding:6px 8px;border-radius:8px;font-weight:700;color:#e6eef6}
 
     .empty{padding:32px;text-align:center;color:var(--muted)}
     .spinner{width:36px;height:36px;border-radius:50%;border:4px solid rgba(255,255,255,0.08);border-top-color:var(--accent);animation:spin 1s linear infinite;margin-left:8px}
@@ -309,7 +412,7 @@ async def homepage():
               <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               <circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="2"/>
             </svg>
-            <input id="q" placeholder="e.g. hard sci-fi with humor, or 'I liked Dune'"/>
+            <input id="q" placeholder="e.g. 'I liked Dune' or 'romance novels'"/>
             <div id="spinner" style="display:none" class="spinner" aria-hidden="true"></div>
           </div>
           <button class="btn" id="goBtn">Recommend</button>
@@ -423,15 +526,7 @@ async def homepage():
       const desc = document.createElement('div'); desc.className='desc'; desc.textContent = it.description;
       const foot = document.createElement('div'); foot.className='meta-foot';
       const genres = document.createElement('div'); genres.className='genres'; genres.textContent = (it.genres || []).join(', ');
-      const score = document.createElement('div');
-      score.className = 'score';
-      if (typeof it.score === 'number') {
-        const pct = Math.round((it.score) * 100);
-        score.textContent = pct + '%';
-      } else {
-        score.textContent = '';
-      }
-      foot.appendChild(genres); foot.appendChild(score);
+      foot.appendChild(genres);
       meta.appendChild(title); meta.appendChild(author); meta.appendChild(desc); meta.appendChild(foot);
       card.appendChild(cover); card.appendChild(meta);
       resultsEl.appendChild(card);
@@ -450,14 +545,21 @@ async def recommend(request: Request):
     k = int(body.get("k", 5))
     if not text:
         return JSONResponse({"error": "provide 'text' in JSON"}, status_code=400)
-    results = recommend_by_text(text, k=k)
-    return {"results": results}
+    
+    try:
+        results = recommend_by_text(text, k=k)
+        return {"results": results}
+    except Exception as e:
+        print(f"❌ Error in recommendation: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-# Health check endpoint for render
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "books_loaded": len(BOOKS)}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
+    print(f"🚀 Starting server with {len(BOOKS)} books loaded")
     uvicorn.run("app:app", host="0.0.0.0", port=port)
