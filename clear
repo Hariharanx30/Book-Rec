@@ -1,0 +1,159 @@
+[33mcommit 62b8ab727a740e20431d189567a6129670e63ce2[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Hariharanx30 <hariharan.kvm7@gmail.com>
+Date:   Sun Oct 26 12:22:45 2025 +0530
+
+    Updated app.py with better query handling
+
+[1mdiff --git a/app.py b/app.py[m
+[1mindex f342aab..39b46de 100644[m
+[1m--- a/app.py[m
+[1m+++ b/app.py[m
+[36m@@ -40,8 +40,7 @@[m [mif os.path.exists("static"):[m
+ def load_books_from_csv(csv_path="books.csv"):[m
+     """Load books from CSV with memory optimization"""[m
+     try:[m
+[31m-        # More memory-efficient pandas reading[m
+[31m-        df = pd.read_csv(csv_path, dtype={'title': 'string', 'author': 'string', 'description': 'string', 'genres': 'string'})[m
+[32m+[m[32m        df = pd.read_csv(csv_path)[m
+         books = [][m
+         for idx, row in df.iterrows():[m
+             genres_str = str(row.get('genres', '')).strip()[m
+[36m@@ -64,13 +63,13 @@[m [mdef load_books_from_csv(csv_path="books.csv"):[m
+                 book["cover"] = cover_path[m
+             books.append(book)[m
+ [m
+[31m-        print(f"Loaded {len(books)} books from {csv_path}")[m
+[32m+[m[32m        print(f"✅ Loaded {len(books)} books from {csv_path}")[m
+         return books[m
+     except FileNotFoundError:[m
+[31m-        print(f"CSV file {csv_path} not found. Using default book list.")[m
+[32m+[m[32m        print(f"⚠️ CSV file {csv_path} not found. Using default book list.")[m
+         return get_default_books()[m
+     except Exception as e:[m
+[31m-        print(f"Error loading CSV: {e}. Using default book list.")[m
+[32m+[m[32m        print(f"⚠️ Error loading CSV: {e}. Using default book list.")[m
+         return get_default_books()[m
+ [m
+ def get_default_books():[m
+[36m@@ -105,15 +104,6 @@[m [mdef get_default_books():[m
+ # Load books[m
+ BOOKS = load_books_from_csv()[m
+ [m
+[31m-# Lazy initialization of lookup dictionaries[m
+[31m-def get_title_lookup():[m
+[31m-    return {b['title'].lower(): i for i, b in enumerate(BOOKS)}[m
+[31m-[m
+[31m-def get_genres_info():[m
+[31m-    all_genres = sorted({g for b in BOOKS for g in b.get('genres', [])})[m
+[31m-    normalized_genres = [g.lower() for g in all_genres][m
+[31m-    return all_genres, normalized_genres[m
+[31m-[m
+ def _detect_genres_from_query_improved(query):[m
+     """Improved genre detection"""[m
+     q = query.lower().strip()[m
+[36m@@ -131,7 +121,9 @@[m [mdef _detect_genres_from_query_improved(query):[m
+         "social commentary": "social commentary", "thriller": "thriller", "mystery": "mystery",[m
+         "psychological": "psychological", "young adult": "young adult", "ya": "young adult",[m
+         "contemporary": "contemporary fiction", "memoir": "memoir", "biography": "biography",[m
+[31m-        "self-help": "self-help", "philosophy": "philosophy"[m
+[32m+[m[32m        "self-help": "self-help", "philosophy": "philosophy", "comedy": "comedy",[m
+[32m+[m[32m        "time travel": "time travel", "lgbtq": "lgbtq+", "lgbtq+": "lgbtq+",[m
+[32m+[m[32m        "post-apocalyptic": "post-apocalyptic", "military": "military", "western": "western"[m
+     }[m
+     [m
+     if q in genre_mapping:[m
+[36m@@ -152,11 +144,100 @@[m [mdef _detect_genres_from_query_improved(query):[m
+     return list(detected)[m
+ [m
+ def _find_title_mentioned(query):[m
+[31m-    q = (query or "").lower()[m
+[31m-    title_lookup = get_title_lookup()[m
+[31m-    for title, idx in title_lookup.items():[m
+[31m-        if title in q:[m
+[31m-            return idx[m
+[32m+[m[32m    """Enhanced title detection with hardcoded patterns for reliability"""[m
+[32m+[m[32m    if not query:[m
+[32m+[m[32m        return None[m
+[32m+[m[41m        [m
+[32m+[m[32m    q = query.lower().strip()[m
+[32m+[m[41m    [m
+[32m+[m[32m    # Hardcoded query patterns - maps common queries to book indices[m
+[32m+[m[32m    # These will work 100% of the time[m
+[32m+[m[32m    hardcoded_patterns = {[m
+[32m+[m[32m        # Dune patterns[m
+[32m+[m[32m        'i like dune': 'dune',[m
+[32m+[m[32m        'i liked dune': 'dune',[m
+[32m+[m[32m        'i love dune': 'dune',[m
+[32m+[m[32m        'similar to dune': 'dune',[m
+[32m+[m[32m        'books like dune': 'dune',[m
+[32m+[m[32m        'dune': 'dune',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # The Hobbit patterns[m
+[32m+[m[32m        'i like the hobbit': 'the hobbit',[m
+[32m+[m[32m        'i liked the hobbit': 'the hobbit',[m
+[32m+[m[32m        'similar to the hobbit': 'the hobbit',[m
+[32m+[m[32m        'books like the hobbit': 'the hobbit',[m
+[32m+[m[32m        'the hobbit': 'the hobbit',[m
+[32m+[m[32m        'hobbit': 'the hobbit',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Pride and Prejudice patterns[m
+[32m+[m[32m        'i like pride and prejudice': 'pride and prejudice',[m
+[32m+[m[32m        'i liked pride and prejudice': 'pride and prejudice',[m
+[32m+[m[32m        'similar to pride and prejudice': 'pride and prejudice',[m
+[32m+[m[32m        'pride and prejudice': 'pride and prejudice',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # 1984 patterns[m
+[32m+[m[32m        'i like 1984': '1984',[m
+[32m+[m[32m        'i liked 1984': '1984',[m
+[32m+[m[32m        'similar to 1984': '1984',[m
+[32m+[m[32m        'books like 1984': '1984',[m
+[32m+[m[32m        '1984': '1984',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Harry Potter patterns[m
+[32m+[m[32m        'i like harry potter': 'harry potter and the sorcerer\'s stone',[m
+[32m+[m[32m        'i liked harry potter': 'harry potter and the sorcerer\'s stone',[m
+[32m+[m[32m        'similar to harry potter': 'harry potter and the sorcerer\'s stone',[m
+[32m+[m[32m        'harry potter': 'harry potter and the sorcerer\'s stone',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # The Hunger Games patterns[m
+[32m+[m[32m        'i like the hunger games': 'the hunger games',[m
+[32m+[m[32m        'i liked hunger games': 'the hunger games',[m
+[32m+[m[32m        'similar to hunger games': 'the hunger games',[m
+[32m+[m[32m        'hunger games': 'the hunger games',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # The Martian patterns[m
+[32m+[m[32m        'i like the martian': 'the martian',[m
+[32m+[m[32m        'similar to the martian': 'the martian',[m
+[32m+[m[32m        'the martian': 'the martian',[m
+[32m+[m[32m        'martian': 'the martian',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Sapiens patterns[m
+[32m+[m[32m        'i like sapiens': 'sapiens',[m
+[32m+[m[32m        'similar to sapiens': 'sapiens',[m
+[32m+[m[32m        'sapiens': 'sapiens',[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Atomic Habits patterns[m
+[32m+[m[32m        'i like atomic habits': 'atomic habits',[m
+[32m+[m[32m        'atomic habits': 'atomic habits',[m
+[32m+[m[32m    }[m
+[32m+[m[41m    [m
+[32m+[m[32m    # Check hardcoded patterns first[m
+[32m+[m[32m    if q in hardcoded_patterns:[m
+[32m+[m[32m        target_title = hardcoded_patterns[q][m
+[32m+[m[32m        # Find the book by title[m
+[32m+[m[32m        for i, book in enumerate(BOOKS):[m
+[32m+[m[32m            if book['title'].lower() == target_title:[m
+[32m+[m[32m                print(f"✅ Hardcoded match: '{q}' → {book['title']}")[m
+[32m+[m[32m                return i[m
+[32m+[m[41m    [m
+[32m+[m[32m    # Fallback: Try to find any book title mentioned in the query[m
+[32m+[m[32m    for i, book in enumerate(BOOKS):[m
+[32m+[m[32m        title_lower = book['title'].lower()[m
+[32m+[m[41m        [m
+[32m+[m[32m        # Direct substring match[m
+[32m+[m[32m        if title_lower in q:[m
+[32m+[m[32m            print(f"✅ Substring match: {book['title']}")[m
+[32m+[m[32m            return i[m
+[32m+[m[41m    [m
+[32m+[m[32m    # Try without common words[m
+[32m+[m[32m    q_cleaned = re.sub(r'\b(i|like|liked|love|loved|similar|to|books|the|a|an)\b', '',
